@@ -31,10 +31,12 @@ def send_request(url, method="GET", data=None):
     Helper function to send HTTP requests.
     """
     try:
+        parsed = urlparse(url)
+        base_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
         if method.upper() == "POST" and data:
-            response = requests.post(url, data=data, timeout=10, allow_redirects=True)
+            response = requests.post(base_url, data=data, timeout=10, allow_redirects=True)
         else:
-            response = requests.get(url, params=data, timeout=10, allow_redirects=True)
+            response = requests.get(base_url, params=data, timeout=10, allow_redirects=True)
         return response
     except requests.RequestException as e:
         print(f"  Request Error: {e}")

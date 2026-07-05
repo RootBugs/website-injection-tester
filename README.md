@@ -9,145 +9,96 @@
 
 ---
 
-## 🧠 Deep Analysis
+## How It Works
 
-A focused web security testing tool that performs two complementary types of injection testing:
+Two-pass injection testing on any URL:
 
-### Detection Architecture
+1. **URL Parameter Fuzzing** — Parses `?key=value` params, sends XSS + SQLi payloads to each via GET, analyzes response for reflection and error patterns.
+2. **HTML Form Discovery** — Fetches page, finds `<form>` elements via BeautifulSoup, identifies injectable input fields (`text`, `email`, `password`, `textarea`, `select`), sends payloads via POST/GET.
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  URL Input                           │
-│   ./injection_tester.py https://target.com           │
-└────────────────────────┬────────────────────────────┘
-                         │
-            ┌────────────┴────────────┐
-            ▼                         ▼
-┌───────────────────┐     ┌──────────────────────┐
-│ URL Parameter     │     │ HTML Form Discovery  │
-│ Fuzzing           │     │ & Testing            │
-│                   │     │                      │
-│ Parses query      │     │ GET / → parse forms  │
-│ params (?id=1)    │     │ ← BeautifulSoup      │
-│ ─────────────     │     │ ──────────────       │
-│ Tests each param  │     │ Tests each input     │
-│ with XSS & SQLi   │     │ field with XSS &     │
-│ payloads          │     │ SQLi payloads        │
-└────────┬──────────┘     └──────────┬───────────┘
-         │                           │
-         └──────────┬───────────────┘
-                    ▼
-┌─────────────────────────────────────┐
-│       Response Analysis             │
-│                                     │
-│ • Payload reflection check          │
-│ • Database error signature matching │
-│   (SQL syntax, ORA-, mysql, etc.)   │
-│ • Response length comparison        │
-│   (Boolean-based blind SQLi)        │
-│ • Script tag reflection detection   │
-└─────────────────────────────────────┘
+URL Input → parse query params → test each with XSS/SQLi payloads
+         → fetch page → discover forms → test each field with payloads
+         → analyze responses (reflection, error signatures, length comparison)
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
-# Install dependencies
 pip install requests beautifulsoup4
 
-# Scan a URL (with query parameters)
+# Scan URL with query parameters
 python injection_tester.py "https://example.com/page?id=1&search=test"
 
-# Scan a URL for form-based injection
+# Scan a page for form-based injection
 python injection_tester.py "https://example.com/login"
 ```
 
 ---
 
-## 🔬 Detection Methods
+## Detection Methods
 
-### XSS (Cross-Site Scripting) — 7 payloads
+### XSS — 7 payloads
 
-| Payload | Target |
-|---------|--------|
+| Payload | Type |
+|---------|------|
 | `<script>alert('XSS')</script>` | Classic reflected XSS |
-| `'><script>alert(1)</script>` | Breaking out of attributes |
-| `%3Csvg/onload=alert(1)%3E` | URL-encoded SVG vector |
-| `"-alert(document.domain)-"` | Angle-bracket-free XSS |
-| `'><img src=x onerror=alert(1)>` | Form-based img error XSS |
-| `<body onload=alert('XSS-Body')>` | Body onload in forms |
+| `'><script>alert(1)</script>` | Attribute breakout |
+| `%3Csvg/onload=alert(1)%3E` | URL-encoded SVG |
+| `"-alert(document.domain)-"` | Angle-bracket-free |
+| `'><img src=x onerror=alert(1)>` | Form img error XSS |
+| `<body onload=alert('XSS-Body')>` | Body onload |
 | `<script>alert('XSS-Form')</script>` | Form field injection |
 
-**Detection Logic:**
-1. Exact payload reflection in response → ✅ `VULNERABILITY DETECTED`
-2. Partial reflection (first 20 chars) → ✅ `Partial reflection`
-3. `<script>` tag presence in response → ⚠️ Check for execution
+**Detection:** Exact reflection → Vuln. Partial (first 20 chars) → Possible. `<script>` tag present → Check execution.
 
-### SQL Injection — 10 payloads
+### SQLi — 10 payloads
 
 | Payload | Type |
 |---------|------|
 | `' OR 1=1--` | Classic tautology |
 | `' OR '1'='1` | Tautology (no comment) |
 | `' ORDER BY 1--` | Column enumeration |
-| `' UNION SELECT NULL, NULL--` | Union-based extraction |
+| `' UNION SELECT NULL, NULL--` | Union-based |
 | `1; SELECT SLEEP(5)--` | Time-based blind |
 | `admin'--` | Login bypass |
-| `' OR 1=1#` | MySQL comment syntax |
-| `' UNION SELECT 1,database(),3--` | Database fingerprinting |
+| `' OR 1=1#` | MySQL comment |
+| `' UNION SELECT 1,database(),3--` | DB fingerprinting |
 | `' and 0 union select null,null,null,null,null --` | Column count brute-force |
 
-**Detection Logic:**
-1. **Error-based**: 9 database error patterns (`SQL syntax`, `ORA-`, `mysql_fetch_array`, `unclosed quotation mark`, etc.)
-2. **Boolean-based blind**: Response length comparison between `' OR 1=1--` and original (difference < 200 chars = possible injection)
-3. **Time-based**: Payload execution (detected via response timing)
+**Detection:**
+1. **Error-based** — 9 DB error patterns (`SQL syntax`, `ORA-`, `mysql_fetch_array`, `unclosed quotation mark`, etc.)
+2. **Boolean-based blind** — Response length comparison with tautology (diff < 200 chars = possible injection)
+3. **Time-based** — Response timing analysis
 
 ---
 
-## 📋 Options
-
-The script takes a single argument — the target URL:
-
-```bash
-python injection_tester.py "https://example.com/search?q=test"
-```
-
-It automatically:
-1. ✅ Parses URL query parameters (if any)
-2. ✅ Fetches the page and discovers HTML forms
-3. ✅ Tests all parameters/fields with XSS payloads
-4. ✅ Tests all parameters/fields with SQLi payloads
-5. ✅ Generates real-time console output for each test
-
----
-
-## 📝 Output Indicators
+## Output Indicators
 
 | Indicator | Meaning |
 |-----------|---------|
 | `!!! POTENTIAL XSS VULNERABILITY DETECTED !!!` | Payload reflected in page |
-| `!!! POTENTIAL SQL INJECTION VULNERABILITY DETECTED !!!` | Database error or blind SQLi detected |
-| `POSSIBLE SQL INJECTION` | Response length anomaly with tautology |
+| `!!! POTENTIAL SQL INJECTION VULNERABILITY DETECTED !!!` | DB error or blind SQLi |
+| `POSSIBLE SQL INJECTION` | Response length anomaly |
 | `XSS script tags were reflected` | `<script>` found but not exact payload |
-| `Payload was partially reflected` | First 20 chars of payload found in response |
+| `Payload was partially reflected` | First 20 chars found in response |
 
 ---
 
-## ⚠️ Legal & Ethical
+## Bug Fixes
 
-**For authorized security testing and educational use only.**
-
-This tool sends potentially malicious payloads to target servers. Only use on:
-- Systems you own
-- Systems you have explicit written permission to test
-- Your local development environment
-
-Unauthorized use may violate computer fraud and abuse laws.
+- **Fixed duplicate parameter injection**: `send_request` previously appended payloads to URLs that already had query strings, creating duplicate params (server used the original value, not the payload). Now strips query string from URL before sending payload as a fresh parameter.
 
 ---
 
-## 📄 License
+## Legal & Ethical
+
+**For authorized security testing and educational use only.** Only use on systems you own or have explicit written permission to test. Unauthorized use may violate computer fraud and abuse laws.
+
+---
+
+## License
 
 MIT
